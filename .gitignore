@@ -1,2 +1,3 @@
 Dockerfile.kafka-connect
 kafka_connect_register.sh
+/.venv/
