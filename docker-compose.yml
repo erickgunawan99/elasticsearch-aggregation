@@ -1,0 +1,123 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    ports:
+      - "2181:2181"
+    networks:
+      - es-trial
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    depends_on: [zookeeper]
+    container_name: kafka
+    ports:
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    networks:
+      - es-trial
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - es-trial
+  # es-setup:
+  #   image: curlimages/curl:8.7.1
+  #   depends_on:
+  #     elasticsearch:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./es-setup:/setup 
+  #   entrypoint: ["/bin/sh", "/setup/setup/bootstrap.sh"]
+  #   restart: "no"
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.13.0
+    container_name: kibana
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    networks:
+      - es-trial
+
+  # logstash:
+  #   image: docker.elastic.co/logstash/logstash:8.13.0
+  #   depends_on:
+  #     elasticsearch:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./logstash/pipeline:/usr/share/logstash/pipeline
+  #   environment:
+  #     LS_JAVA_OPTS: "-Xms512m -Xmx512m"
+  # kafka-connect:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.kafka-connect
+  #   depends_on: [kafka, elasticsearch]
+  #   container_name: kafka-connect
+  #   ports:
+  #     - "8083:8083"
+  #   environment:
+  #     CONNECT_BOOTSTRAP_SERVERS: kafka:9092
+  #     CONNECT_REST_PORT: 8083
+  #     CONNECT_GROUP_ID: es-connect-group
+  #     CONNECT_CONFIG_STORAGE_TOPIC: connect-configs
+  #     CONNECT_OFFSET_STORAGE_TOPIC: connect-offsets
+  #     CONNECT_STATUS_STORAGE_TOPIC: connect-status
+  #     CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+  #     CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+  #     CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+  #     CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+  #     CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+  #     CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+  #     CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components
+  #     CONNECT_REST_ADVERTISED_HOST_NAME: kafka
+  #     CONNECT_REST_ADVERTISED_PORT: 8083
+  #   command:
+  #     - bash
+  #     - -c
+  #     - |
+  #       confluent-hub install --no-prompt confluentinc/kafka-connect-elasticsearch:14.0.12
+  #       /etc/confluent/docker/run
+
+  vector:
+    image: timberio/vector:0.38.0-distroless-libc
+    volumes:
+      - ./vector/vector.toml:/etc/vector/vector.toml:ro
+    command: ["--config-dir", "/etc/vector/"]
+    depends_on: [kafka, elasticsearch]
+    networks:
+      - es-trial
+
+volumes:
+  es_data:
+networks:
+  es-trial:

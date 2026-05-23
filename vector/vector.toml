@@ -1,0 +1,18 @@
+[sources.kafka_in]
+type = "kafka"
+bootstrap_servers = "kafka:9092"
+topics = ["metrics-raw"]
+group_id = "vector-consumer"
+auto_offset_reset = "latest"
+
+[sources.kafka_in.decoding]
+codec = "json"
+
+[sinks.es_out]
+type = "elasticsearch"
+inputs = ["kafka_in"]
+endpoints = ["http://elasticsearch:9200"]
+bulk.action = "create"
+bulk.index = "metrics-raw"
+batch.max_events = 500
+batch.timeout_secs = 1

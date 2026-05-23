@@ -1,0 +1,244 @@
+- raw query for elasticsearch, to be used in Kibana Dev Tools or in a curl command
+
+GET metrics/_mapping
+GET _cat/indices?v
+GET _data_stream/metrics-*
+{
+  "size": 0,
+  "query": { "range": { "@timestamp": { "gte": "now-1h" } } },
+  "aggs": {
+    "over_time": {
+      "date_histogram": {
+        "field": "@timestamp",
+        "fixed_interval": "1m"
+      },
+      "aggs": {
+        "doc_count": { "value_count": { "field": "_id" } }
+      }
+    }
+  }
+}
+
+
+"size": 0    → return 0 raw docs, only aggregation results (what you want for dashboards)
+"size": 10   → return 10 raw docs + aggregation results
+"size": 100  → return 100 raw docs + aggregation results
+
+
+- break down of the raw query roll up
+{
+  "size": 0,                          // no raw docs, aggs only
+
+  "query": {                          // filter BEFORE aggregating
+    "range": {
+      "@timestamp": {
+        "gte": "now-1h",              // last 1 hour
+        "lte": "now"                  // optional, now is default
+      }
+    }
+  },
+
+  "aggs": {                           // aggregations
+    "over_time": {                    // arbitrary name, you choose this
+      "date_histogram": {             // bucket type
+        "field": "@timestamp",
+        "fixed_interval": "1m",       // bucket size: 1m, 5m, 1h, 1d etc
+        "min_doc_count": 0,           // optional: show empty buckets
+        "extended_bounds": {          // optional: force full range even if no data
+          "min": "now-1h",
+          "max": "now"
+        }
+      },
+      "aggs": {                       // nested aggs inside each bucket
+        "doc_count": { 
+          "value_count": { 
+            "field": "_id"            // count docs
+          }
+        }
+      }
+    }
+  }
+}
+
+- time range options
+"range": {
+  "@timestamp": {
+    "gte": "now-1h",      // relative: now-1h, now-7d, now-30m
+    "gte": "2026-05-09T00:00:00Z",  // absolute ISO
+    "gte": "now/d",       // rounded: start of today
+    "lte": "now",
+    "lte": "now/d"        // end of today
+  }
+}
+
+
+GET metrics-*/_search
+{
+  "size": 0,
+  "query": { "range": { "@timestamp": { "gte": "now-1h" } } },
+  "aggs": {
+    "over_time": {
+      "date_histogram": {
+        "field": "@timestamp",
+        "fixed_interval": "1m"
+      },
+      "aggs": {
+        "grouped": { "terms": { "field": "host" } }
+      }
+    }
+  }
+
+
+- interval options
+"fixed_interval": "1m"   // strict: 10s, 30s, 1m, 5m, 1h, 1d
+"calendar_interval": "1d" // calendar-aware: 1d, 1w, 1M, 1q, 1y
+                          // handles DST, month lengths correctly
+
+- nested aggregation options
+// count
+"value_count": { "field": "_id" }
+
+// numeric stats
+"avg":    { "field": "cpu_percent" }
+"min":    { "field": "cpu_percent" }
+"max":    { "field": "cpu_percent" }
+"sum":    { "field": "request_count" }
+
+// percentiles
+"percentiles": { 
+  "field": "latency_ms", 
+  "percents": [50, 95, 99] 
+}
+
+// group by field inside each time bucket
+"terms": { 
+  "field": "host",
+  "size": 10          // top 10 hosts
+}
+
+// stats all at once
+"stats": { "field": "cpu_percent" }
+// returns min, max, avg, sum, count in one shot
+
+
+- avg cpu per host per minute
+{
+  "size": 0,
+  "query": {
+    "range": { "@timestamp": { "gte": "now-1h" } }
+  },
+  "aggs": {
+    "over_time": {
+      "date_histogram": {
+        "field": "@timestamp",
+        "fixed_interval": "1m"
+      },
+      "aggs": {
+        "by_host": {
+          "terms": { "field": "host", "size": 3 },
+          "aggs": {
+            "avg_cpu": { "avg": { "field": "cpu_percent" } }
+          }
+        }
+      }
+    }
+  }
+}
+
+
+- filter the string value
+{
+  "size": 0,
+  "query": {
+    "range": { "@timestamp": { "gte": "now-1h" } }
+  },
+  "aggs": {
+    "over_time": {
+      "date_histogram": {
+        "field": "@timestamp",
+        "fixed_interval": "1m"
+      },
+      "aggs": {
+        "error_count": {
+          "filter": {
+            "term": { "error": true }    
+          }
+        }
+      }
+    }
+  }
+}
+
+- error by host per 5 minute
+GET /metrics*/_async_search
+{
+  "size": 0,
+  "query": {
+    "range": { "@timestamp": { "gte": "now-30m" } }
+  },
+  "aggs": {
+    "over_time": {
+      "date_histogram": {
+        "field": "@timestamp",
+        "fixed_interval": "5m"
+      },
+       "aggs": {
+        "by_host": {
+          "terms": { "field": "host.keyword"},
+          "aggs": {
+            "error_count": { 
+              "filter": {
+                "term": { "error": true } }
+          }
+        }
+      }
+    }
+    }
+  }
+}
+
+GET metrics-*/_search
+{
+  "size": 0,
+  "query": { "range": { "@timestamp": { "gte": "now-10h" } } },
+  "aggs": {
+    "over_time": {
+      "date_histogram": {
+        "field": "@timestamp",
+        "fixed_interval": "10m"
+      },
+      "aggs": {
+        "by_host": { "terms": 
+        { "field": "host" },
+         "aggs": {
+          "by_service": { "terms": {
+            "field": "service" } }
+        }
+      }
+    }
+    }}}
+
+GET /metrics-*/_search
+{
+  "query": {
+    "match": {
+      "error": "true"
+    }
+  }
+}
+
+Yes — `GET` and `POST` are both valid for search queries in ES. It's one of ES's quirks:
+
+```
+GET metrics-*/_search { ... }   ✅ works
+POST metrics-*/_search { ... }  ✅ also works
+```
+
+Technically HTTP spec says `GET` shouldn't have a body, but ES supports it anyway. Some clients (like certain proxies or load balancers) strip `GET` request bodies though — so `POST` is considered safer and is what Kibana uses internally (as you saw in Lens inspect).
+
+```
+GET  → semantically "read only", no side effects
+POST → semantically "submit data", but ES accepts it for search too
+```
+
+For `_async_search` specifically — it's always `POST` because it creates a background search job (has a side effect), so `GET` wouldn't be appropriate there.
